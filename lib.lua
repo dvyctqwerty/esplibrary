@@ -8,7 +8,7 @@ local currentCamera     = cloneref(workspace.CurrentCamera);
 
 local createDrawing           = function(_type, properties, ...)
       local drawing = Drawing.new(_type);
-      for i, value in properties do
+      for i, value in pairs(properties) do
             drawing[i] = value;
       end;
       for _, _table in {...} do
@@ -16,23 +16,37 @@ local createDrawing           = function(_type, properties, ...)
       end;
       return drawing;
 end;
-local getBoundingBox = function(model, isPlayer: boolean?)
-      -- local cframe, size;-- = model:GetBoundingBox();
-      if (isPlayer) then
-            return model:ComputeR15BodyBoundingBox();
-      end;
+local getBoundingBox = function(model, isPlayer)
+    if not model then return nil, nil end
 
-      return model:GetBoundingBox();
+    local success, cf, size
 
-      -- if (maxsize) then
-      --       size = Vector3.new(math.min(size.X, 5), math.min(size.Y, 6.7), math.min(size.Z, 5));
-      -- end;
-      -- return cframe, size;
-end;
+    if isPlayer then
+        success, cf, size = pcall(function()
+            return model:ComputeR15BodyBoundingBox()
+        end)
+    else
+        success, cf, size = pcall(function()
+            return model:GetBoundingBox()
+        end)
+    end
+
+    if not success or not cf or not size then
+        return nil, nil
+    end
+
+    return cf, size
+end
+
 local worldToViewPoint = function(position)
-      local pos, onscreen = currentCamera:WorldToViewportPoint(position);
-      return Vector2.new(pos.X, pos.Y), onscreen, pos.Z;
-end;
+    if not position then return nil, false, nil end
+    
+    local pos, onscreen = currentCamera:WorldToViewportPoint(position)
+    
+    if not pos then return nil, false, nil end
+    
+    return Vector2.new(pos.X, pos.Y), onscreen, pos.Z
+end
 
 -- local executor 	= identifyexecutor and identifyexecutor() or 'unknown';
 
@@ -201,7 +215,7 @@ do
             self.drawings = drawings;
             self.allDrawings = allDrawings;
 
-            table.insert(self.drawings, self.allDrawingCache);
+            table.insert(self.allDrawingCache, drawings);
       end;
       function playerESP:hideDrawings()
             if (self.hidden) then
@@ -269,20 +283,31 @@ do
       function playerESP:loop(settings, distance)
             local current = self.current;
 
-            local _, size     = getBoundingBox(current.humanoid, true);
-            local goal        = current.rebuiltPos or current.rootPart.Position;
-
-            local vector2, onscreen = worldToViewPoint(goal);
-            if (not onscreen) then
-                  return self:hideDrawings();
-            end;
+            local cf, size = getBoundingBox(current.humanoid, true)
+			if not cf or not size then
+			    return self:hideDrawings()
+			end
+			
+			local goal = current.rebuiltPos or current.rootPart.Position
+			if not goal then
+			    return self:hideDrawings()
+			end
+			
+			local vector2, onscreen = worldToViewPoint(goal)
+			if not vector2 or not onscreen then
+			    return self:hideDrawings()
+			end
             self.hidden = false;
 
             local cframe      = CFrame.new(goal, currentCamera.CFrame.Position);
 
             local x, y = -size.X / 2, size.Y / 2;
-            local topright    = worldToViewPoint((cframe * CFrame.new(x, y, 0)).Position)
-            local bottomright = worldToViewPoint((cframe * CFrame.new(x, -y, 0)).Position)
+            local topright = worldToViewPoint((cframe * CFrame.new(x, y, 0)).Position)
+			local bottomright = worldToViewPoint((cframe * CFrame.new(x, -y, 0)).Position)
+			
+			if not topright or not bottomright then
+			    return self:hideDrawings()
+			end
 
             local offset = Vector2.new(
                   math.max(topright.X - vector2.X, bottomright.X - vector2.X),
@@ -373,54 +398,55 @@ do
 
       --render functions
       function playerESP:renderBox(vector2, offset, enabled)
-            local drawings = self.drawings;
+	    local drawings = self.drawings
+	
+	    if not enabled or not vector2 or not offset then
+	        drawings.box.Visible = false
+	        drawings.boxOutline.Visible = false
+	        return
+	    end
+	
+	    local position = vector2 - offset
+	    local size = offset * 2
+	
+	    drawings.box.Visible = true
+	    drawings.box.Position = position
+	    drawings.box.Size = size
+	
+	    drawings.boxOutline.Visible = true
+	    drawings.boxOutline.Position = position
+	    drawings.boxOutline.Size = size
+	end
+     function playerESP:renderName(vector2, offset, enabled)
+	    local name = self.drawings.name
+	
+	    if not enabled or not vector2 or not offset then
+	        name.Visible = false
+	        return
+	    end
+	
+	    if not offset.Y or not name.Size then
+	        name.Visible = false
+	        return
+	    end
+	
+	    name.Visible = true
+	    name.Position = vector2 - Vector2.new(0, offset.Y + name.Size)
+	end
+     function playerESP:renderDistance(vector2, offset, enabled, _distance)
+    local distance = self.drawings.distance
 
-            if (not enabled) then
-                  drawings.box.Visible          = false;
-                  drawings.boxOutline.Visible   = false;
-                  return;
-            end;
+    if not enabled or not vector2 or not offset or not self.current.rootPart then
+        distance.Visible = false
+        return
+    end
 
-            local fill        = drawings.box;
-            local outline     = drawings.boxOutline;
+    local magnitude = math.round(_distance or (currentCamera.CFrame.Position - self.current.rootPart.Position).Magnitude)
 
-            local position    = vector2 - offset;
-            local size        = offset * 2;
-            
-            fill.Visible      = true;
-            fill.Position     = position;
-            fill.Size         = size;
-
-            outline.Visible   = true;
-            outline.Position  = position;
-            outline.Size      = size;
-      end;
-      function playerESP:renderName(vector2, offset, enabled)
-            local name = self.drawings.name;
-
-            if (not enabled) then
-                  name.Visible          = false;
-                  return;
-            end;
-            
-            name.Visible      = true;
-            name.Position     = vector2 - Vector2.new(0, offset.Y + name.Size);
-      end;
-      function playerESP:renderDistance(vector2, offset, enabled, _distance)
-            local distance = self.drawings.distance;
-
-            if (not enabled) then
-                  distance.Visible          = false;
-                  return;
-            end;
-
-            local Yoffset     = self.drawings.weapon.Visible and 13 or 0;
-            local magnitude   = math.round( _distance or (currentCamera.CFrame.Position - self.current.rootPart.Position).Magnitude );
-            
-            distance.Visible  = true;
-            distance.Position = vector2 + Vector2.new(0, offset.Y + Yoffset);
-            distance.Text     = `[{magnitude}]`;
-      end;
+    distance.Visible = true
+    distance.Position = vector2 + Vector2.new(0, offset.Y)
+    distance.Text = `[${magnitude}]`
+end
       function playerESP:renderWeapon(vector2, offset, enabled)
             local weapon = self.drawings.weapon;
 
@@ -434,11 +460,11 @@ do
             weapon.Text     = self.current.weapon and string.lower(self.current.weapon.Name) or 'none';
       end;
       function playerESP:renderHealthbar(vector2, offset, enabled)
-            if (not enabled) then
-                  self.drawings.healthBar.Visible = false;
-                  self.drawings.healthBackground.Visible = false;
-                  return;
-            end;
+          if not vector2 or not offset or not self.current.healthPercentage then
+			    self.drawings.healthBar.Visible = false
+			    self.drawings.healthBackground.Visible = false
+			    return
+			end
 
             local healthBar         = self.drawings.healthBar;
             local healthBackground  = self.drawings.healthBackground;
@@ -582,7 +608,6 @@ do
             self.drawings = drawings;
             self.allDrawings = allDrawings;
 
-            table.insert(self.drawings, self.allDrawingCache);
       end;
       function entityESP:hideDrawings()
             if (self.hidden) then
@@ -837,7 +862,6 @@ do
             self.drawings = drawings;
             self.allDrawings = allDrawings;
 
-            table.insert(self.drawings, self.allDrawingCache);
       end;
       function npcESP:hideDrawings()
             if (self.hidden) then
